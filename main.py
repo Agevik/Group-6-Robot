@@ -13,19 +13,16 @@ https://education.lego.com/en-us/support/mindstorms-ev3/building-instructions#bu
 
 from pybricks.hubs import EV3Brick
 from pybricks.ev3devices import Motor, TouchSensor, ColorSensor
-from pybricks.parameters import Port, Stop, Direction, Color
+from pybricks.parameters import Port, Stop, Direction, Color, Button
+from pybricks.media.ev3dev import Image, ImageFile, SoundFile
 from pybricks.tools import wait
 
 import socket
+import threading
 
 
 # Initialize the EV3 Brick
 ev3 = EV3Brick()
-
-# Setup socket server
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.bind(('192.168.0.1', 8080))  # Bind to any IP on port 8080
-server_socket.listen(1)
 
 # Configure the gripper motor on Port A with default settings.
 gripper_motor = Motor(Port.A)
@@ -87,7 +84,6 @@ gripper_motor.run_until_stalled(200, then=Stop.COAST, duty_limit=50)
 gripper_motor.reset_angle(0)
 gripper_motor.run_target(200, -90)
 
-
 def robot_pick(position):
     # This function makes the robot base rotate to the indicated
     # position. There it lowers the elbow, closes the gripper, and
@@ -101,7 +97,9 @@ def robot_pick(position):
     # Close the gripper to grab the wheel stack.
     gripper_motor.run_until_stalled(200, then=Stop.HOLD, duty_limit=50)
     # Raise the arm to lift the wheel stack.
-    elbow_motor.run_target(60, 0)
+    elbow_motor.run_target(50, 0)
+
+    robot_release(get_color())
 
 
 def robot_release(position):
@@ -118,21 +116,27 @@ def robot_release(position):
     gripper_motor.run_target(200, -90)
     # Raise the arm.
     elbow_motor.run_target(60, 0)
+    monitor_bool = True
 
 
 # Play three beeps to indicate that the initialization is complete.
 for i in range(3):
-    ev3.speaker.beep()
+    #ev3.speaker.beep()
     wait(100)
 
-# Define the three destinations for picking up and moving the wheel stacks.
+monitor_bool = False
+change_angles_bool = False
+emergency_stop_bool = False
+change_pick_up_bool = False
+start_bool = False
+pause_bool = False
 
 #def zone_config():
 zone1 = 200
 zone2 = 160
-zone3 = 105
+zone3 = 100
 zone4 = 50
-zone5 = 5
+zone5 = 10
 
 #zone_config()
 PICK_UP_ZONE = zone3
@@ -140,6 +144,9 @@ BLUE = zone1
 YELLOW = zone5
 RED = zone4
 GREEN = zone2
+
+angles = [BLUE, YELLOW, RED, GREEN]
+current_index = 0
 
 def get_color():
     if elbow_sensor.color() == Color.YELLOW:
@@ -153,62 +160,183 @@ def get_color():
     else:
         return BLUE
 
-def set_pick_up_zone(new_Pickup_Zone):
-    PICK_UP_ZONE = new_Pickup_zone
-
-def set_drop_off_zones(new_Yellow, new_Blue, new_Red):
-    YELLOW = new_Yellow
-    BLUE = new_Blue
-    RED = new_Red
-
-def monitor_pick_up_zone(pick_up_zone):
+def monitor_pick_up_zone():
     # This function makes the robot base rotate to the indicated
     # position. There it lowers the elbow, closes the gripper, and
     # raises the elbow to pick up the object.
 
+    gripper_motor.run_target(200, -90)
     # Rotate to the pick-up position.
-    base_motor.run_target(60, pick_up_zone)
+    base_motor.run_target(60, PICK_UP_ZONE)
     # Lower the arm.
     elbow_motor.run_target(60, -40)
     #elbow_motor.run_until_stalled(-60, then=Stop.HOLD, duty_limit=10)
     # Close the gripper to grab the wheel stack.
     gripper_motor.run_until_stalled(200, then=Stop.HOLD, duty_limit=50)
     # Raise the arm to lift the wheel stack.
-    elbow_motor.run_target(60, 0)
+    elbow_motor.run_target(60, 7)
 
+    wait(1000)
     #anta att 0 = stängd gripper och mindre än det är öppet
-    #if gripper_motor.angle() < -10:   
-    #   robot_release(get_color())
-    #else:
-    #   
+    if gripper_motor.angle() < -10:   
+        monitor_bool = False
+        robot_release(get_color())
+
+def set_time_schedule():
+    print("t")
 
 # This is the main part of the program. It is a loop that repeats endlessly.
 # 
 # First, the robot moves the object on the left towards the middle.
 # Second, the robot moves the object on the right towards the left.
 # Finally, the robot moves the object that is now in the middle, to the right.
-print("Waiting for a connection...")
-connection, client_address = server_socket.accept()
-
-try:
-    print("Connection from", client_address)
-    while True:
-        data = connection.recv(16).decode('utf-8')
-        if data:
-            print("Received command:", data)
-            if data == 'pick':
-                robot_pick(PICK_UP_ZONE)
-            elif data == 'release':
-                robot_release(get_color())
-            #elif data == 'stop':
-                #motor.stop()
-        else:
-            break
-finally:
-    connection.close()
 # Now we have a wheel stack on the left and on the right as before, but they
 # have switched places. Then the loop repeats to do this over and over.
-#while True:
-    # Move a wheel stack from the right to the left.
-    #robot_pick(PICK_UP_ZONE)
-    #robot_release(get_color())
+def emergency_stop():
+    while True:
+        while Button.DOWN in ev3.buttons.pressed() and not change_pick_up_bool and not change_angles_bool:
+            print("EMERGENCY CALLED")            
+            monitor_bool = False
+            base_motor.hold()
+            elbow_motor.run_target(60, -40)
+            ev3.screen.clear()
+            ev3.screen.draw_text(0, 0, "Emergency stop", text_color=Color.BLACK, background_color=None)
+            ev3.screen.draw_text(0, 30, "called", text_color=Color.BLACK, background_color=None)
+            print(monitor_bool)
+        if emergency_stop_bool:
+            if Button.CENTER in ev3.buttons.pressed():
+                emergency_bool = False
+                monitor_bool = True
+
+def pause():
+    while pause_bool:
+        while Button.LEFT in ev3.buttons.pressed() and not change_angles_bool and not change_pick_up_bool:
+            base_motor.hold()
+
+t1 = threading.Thread(target=emergency_stop)
+t2 = threading.Thread(target=pause)
+
+t1.start()
+t2.start()
+wait(300)
+
+while True:
+    # Check if any buttons are pressed
+    if Button.UP in ev3.buttons.pressed() and change_pick_up_bool == False:
+        monitor_bool = False
+        change_angles_bool = True
+    elif Button.RIGHT in ev3.buttons.pressed() and change_angles_bool == False:
+        monitor_bool = False
+        change_pick_up_bool = True
+    elif Button.DOWN in ev3.buttons.pressed() and not change_angles_bool and not change_pick_up_bool and start_bool:
+        monitor_bool = False
+        emergency_stop_bool = True
+    elif Button.LEFT in ev3.buttons.pressed() and not change_angles_bool and not change_pick_up_bool:
+        monitor_bool = False
+        pause_bool = True
+
+    if monitor_bool:
+        print(monitor_bool)
+        ev3.screen.clear()
+        ev3.screen.draw_text(0, 0, "Monitoring pick-up ", text_color=Color.BLACK, background_color=None)
+        ev3.screen.draw_text(0, 30, "zones", text_color=Color.BLACK, background_color=None)
+        monitor_pick_up_zone()
+
+    if change_pick_up_bool:
+        wait(500)
+        ev3.screen.clear()
+        ev3.screen.draw_text(0, 0, "Pick-up zones:", text_color=Color.BLACK, background_color=None)
+        ev3.screen.draw_text(0, 30, str(PICK_UP_ZONE), text_color=Color.BLACK, background_color=None)
+
+        if Button.UP in ev3.buttons.pressed():
+            PICK_UP_ZONE += 10
+            if PICK_UP_ZONE > 360:
+                PICK_UP_ZONE -= 360
+        elif Button.DOWN in ev3.buttons.pressed():
+            PICK_UP_ZONE -= 10
+            if PICK_UP_ZONE < 0:
+                PICK_UP_ZONE += 360
+        elif Button.CENTER in ev3.buttons.pressed():
+            if not pause_bool:
+                monitor_bool = True
+            change_pick_up_bool = False
+
+
+    if emergency_stop_bool and not change_angles_bool and not change_pick_up_bool and start_bool:
+        monitor_bool = False
+        base_motor.hold()
+        elbow_motor.run_target(60, -40)
+        ev3.screen.clear()
+        ev3.screen.draw_text(0, 0, "Emergency stop", text_color=Color.BLACK, background_color=None)
+        ev3.screen.draw_text(0, 30, "called", text_color=Color.BLACK, background_color=None)        
+        if Button.CENTER in ev3.buttons.pressed():
+            elbow_motor.run_target(60, 7)
+            monitor_bool = True
+            emergency_stop_bool = False
+
+    if pause_bool and not change_angles_bool and not change_pick_up_bool:
+        base_motor.hold()
+        ev3.screen.clear()
+        ev3.screen.draw_text(0, 0, "Paused", text_color=Color.BLACK, background_color=None)
+        if Button.RIGHT in ev3.buttons.pressed():
+            robot_release(get_color)
+            monitor_bool = True
+            pause_bool = False
+        wait(100)
+
+    if not start_bool:
+        monitor_bool = False
+        base_motor.hold()
+        if not change_angles_bool and not change_pick_up_bool:
+            wait(100)
+            ev3.screen.clear()
+            ev3.screen.draw_text(0, 0, "press down to start", text_color=Color.BLACK, background_color=None)
+                
+        if Button.DOWN in ev3.buttons.pressed() and not change_angles_bool and not change_pick_up_bool:
+            elbow_motor.run_target(60, 7)
+            monitor_bool = True
+            start_bool = True
+            
+
+    
+    if change_angles_bool:
+        wait(500)
+        ev3.screen.clear()
+        ev3.screen.draw_text(0, 0, "Drop off zones:", text_color=Color.BLACK, background_color=None)
+        ev3.screen.draw_text(0, 30, "B      Y      R      G", text_color=Color.BLACK, background_color=None)
+        ev3.screen.draw_text(0, 60, str(angles[0]) + "  " + str(angles[1]) + "  " + str(angles[2]) + "  " + str(angles[3]), text_color=Color.BLACK, background_color=None)
+        ev3.screen.draw_text(current_index * 50, 90, "  ", Color.BLACK, background_color=Color.BLACK)
+        
+        # Toggle between columns
+        if Button.RIGHT in ev3.buttons.pressed():
+            if current_index != 3:
+               current_index += 1
+            else:
+                current_index = 0
+        elif Button.LEFT in ev3.buttons.pressed():
+            if current_index != 0:
+                current_index -= 1
+            else:
+                current_index = 3
+        
+        # Increase/Decrease angle value
+        elif Button.UP in ev3.buttons.pressed():
+            angles[current_index] += 10
+            if angles[current_index] > 360:
+                angles[current_index] -= 360
+        elif Button.DOWN in ev3.buttons.pressed():
+            angles[current_index] -= 10
+            if angles[current_index] < 0:
+                angles[current_index] += 360
+
+        elif Button.CENTER in ev3.buttons.pressed():
+            if not pause_bool:
+                monitor_bool = True
+            change_angles_bool = False 
+        
+        BLUE = angles[0]
+        YELLOW = angles[1]
+        RED = angles[2]
+        GREEN = angles[3]
+
+        print("index: " + str(current_index) + ", value: " + str(angles[current_index]))
